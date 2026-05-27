@@ -103,30 +103,41 @@ signal tech_result(tier: String, quality: float, impulse: float)
 
 @onready var ground_probe: RayCast3D = $GroundProbe
 
-@export_category("Arms")
-## Time without punching before the combo resets back to Jab_R.
-@export var combo_reset_time := 2.0
-## Default arm animation played when the player is not punching.
-@export var idle_arm_anim := "Guard"
-## Animation name used for the right jab.
-@export var jab_r_anim := "Jab_R"
-## Animation name used for the left jab.
-@export var jab_l_anim := "Jab_L"
-## Blend time when switching between arm animations.
-@export var punch_blend_time := 0.05
+@export_category("Finger Gun")
+## Maximum number of finger-gun shots before the player needs to reload.
+@export var finger_gun_max_ammo := 6
+## Default arm animation played when the player is not firing, broken, or reloading.
+@export var idle_arm_anim := "finger_gun_idle"
+## Animation played when the player successfully fires the finger gun.
+@export var finger_gun_fire_anim := "finger_gun_fire"
+## Animation played when the player tries to fire with no ammo.
+@export var finger_gun_broken_anim := "finger_gun_broken"
+## Animation played when the player reloads/fixes the finger gun.
+@export var finger_gun_fix_anim := "finger_gun_fix"
+## Blend time when switching between finger-gun animations.
+@export var finger_gun_blend_time := 0.05
 
-@export_category("Punch Audio")
-## Grunt sounds randomly chosen whenever a punch animation actually starts.
-@export var punch_grunts: Array[AudioStream] = []
-
+@onready var finger_gun_reload_audio_player: AudioStreamPlayer = $FingerGunReloadAudioPlayer
+@onready var finger_gun_audio_player: AudioStreamPlayer = $FingerGunAudioPlayer
 @onready var arm_rig: Node3D = $YawPivot/PitchPivot/ArmRig
 @onready var arms_anim: AnimationPlayer = arm_rig.find_child("AnimationPlayer", true, false) as AnimationPlayer
-@onready var punch_grunt_player: AudioStreamPlayer = $PunchGruntPlayer
 
-var _next_jab_is_right := true
-var _jab_reset_timer := 0.0
-var _is_jabbing := false
-var _queued_jab := false
+@export_category("Bullet Impacts")
+## Scene spawned on surfaces hit by the finger gun raycast.
+@export var bullet_hole_scene: PackedScene
+## Maximum distance the finger gun can hit.
+@export var finger_gun_range := 100.0
+## How far the bullet hole is pushed away from the wall to prevent z-fighting.
+@export var bullet_hole_surface_offset := 0.01
+## Random rotation applied to each bullet hole so repeated shots look less identical.
+@export var bullet_hole_random_rotation := true
+
+var _finger_gun_ammo := 6
+var _finger_gun_busy := false
+var _finger_gun_reloading := false
+var _queued_finger_gun_fire := false
+var _queued_finger_gun_reload := false
+var _finger_gun_broken_idle := false
 
 var _gravity := 24.0
 
@@ -153,6 +164,8 @@ func _ready() -> void:
 	_gravity = float(ProjectSettings.get_setting("physics/3d/default_gravity"))
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
+	_finger_gun_ammo = finger_gun_max_ammo
+
 	if landing_shadow != null:
 		landing_shadow.top_level = true
 
@@ -175,7 +188,10 @@ func _input(event: InputEvent) -> void:
 		_jump_released_event = true
 
 	if event.is_action_pressed("attack"):
-		_do_jab()
+		_request_finger_gun_fire()
+
+	if event.is_action_pressed("reload"):
+		_request_finger_gun_reload()
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
@@ -189,7 +205,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		Input.mouse_mode = (
 			Input.MOUSE_MODE_VISIBLE
 			if Input.mouse_mode == Input.MOUSE_MODE_CAPTURED
-			else Input.mouse_mode == Input.MOUSE_MODE_CAPTURED
+			else Input.MOUSE_MODE_CAPTURED
 		)
 
 func _physics_process(delta: float) -> void:
@@ -200,11 +216,6 @@ func _physics_process(delta: float) -> void:
 
 	_tech_buffer_timer = maxf(0.0, _tech_buffer_timer - delta)
 	_tech_buffer_cd = maxf(0.0, _tech_buffer_cd - delta)
-
-	_jab_reset_timer = maxf(0.0, _jab_reset_timer - delta)
-
-	if _jab_reset_timer <= 0.0 and not _is_jabbing and not _queued_jab:
-		_next_jab_is_right = true
 
 	_update_landing_approach_feedback()
 	
@@ -412,66 +423,132 @@ func _update_landing_approach_feedback() -> void:
 	# Smooth for readability
 	_approach_smoothed = lerpf(_approach_smoothed, t, 16.0 * get_physics_process_delta_time())
 	emit_signal("landing_approach", _approach_smoothed)
-	
-func _do_jab() -> void:
+
+func _request_finger_gun_fire() -> void:
 	if arms_anim == null:
 		return
 
-	# Any click keeps the combo alive.
-	_jab_reset_timer = combo_reset_time
-
-	# If a jab is already playing, do NOT restart it.
-	# Just queue one next jab.
-	if _is_jabbing:
-		_queued_jab = true
+	# Do not restart the current finger-gun animation.
+	# Queue one fire request instead.
+	if _finger_gun_busy:
+		_queued_finger_gun_fire = true
 		return
 
-	_play_next_jab()
+	_play_finger_gun_fire_or_broken()
 
-func _play_next_jab() -> void:
+func _request_finger_gun_reload() -> void:
 	if arms_anim == null:
 		return
 
-	var anim_to_play := jab_r_anim if _next_jab_is_right else jab_l_anim
+	# No need to reload if already full.
+	if _finger_gun_ammo >= finger_gun_max_ammo:
+		return
 
-	_is_jabbing = true
-	arms_anim.play(StringName(anim_to_play), punch_blend_time)
+	# Do not interrupt the current fire/broken animation.
+	# Queue reload to happen after it finishes.
+	if _finger_gun_busy:
+		_queued_finger_gun_reload = true
+		_queued_finger_gun_fire = false
+		return
 
-	_play_random_punch_grunt()
+	_play_finger_gun_reload()
 
-	# Flip the next jab after starting this one.
-	_next_jab_is_right = not _next_jab_is_right
-	_jab_reset_timer = combo_reset_time
-	
+func _play_finger_gun_fire_or_broken() -> void:
+	if arms_anim == null:
+		return
+
+	_finger_gun_busy = true
+
+	if _finger_gun_ammo > 0:
+		_finger_gun_ammo -= 1
+
+		# If this shot used the last ammo, the fingers should break after the fire animation.
+		if _finger_gun_ammo <= 0:
+			_finger_gun_broken_idle = true
+			_queued_finger_gun_fire = false
+		else:
+			_finger_gun_broken_idle = false
+
+		arms_anim.play(StringName(finger_gun_fire_anim), finger_gun_blend_time)
+		_play_finger_gun_shot_sound()
+		_spawn_bullet_impact()
+
+		if debug_tech:
+			print("Finger gun fired. Ammo: ", _finger_gun_ammo, "/", finger_gun_max_ammo)
+	else:
+		_finger_gun_broken_idle = true
+		_queued_finger_gun_fire = false
+		arms_anim.play(StringName(finger_gun_broken_anim), finger_gun_blend_time)
+
+		if debug_tech:
+			print("Finger gun empty.")
+
+func _play_finger_gun_reload() -> void:
+	if arms_anim == null:
+		return
+
+	_finger_gun_busy = true
+	_finger_gun_reloading = true
+	_finger_gun_broken_idle = false
+	_queued_finger_gun_reload = false
+
+	arms_anim.play(StringName(finger_gun_fix_anim), finger_gun_blend_time)
+	_play_finger_gun_reload_sound()
+
+	if debug_tech:
+		print("Reloading finger gun.")
+
 func _on_arms_animation_finished(anim_name: StringName) -> void:
 	if arms_anim == null:
 		return
 
-	if anim_name != StringName(jab_r_anim) and anim_name != StringName(jab_l_anim):
+	if anim_name == StringName(finger_gun_fix_anim):
+		_finger_gun_ammo = finger_gun_max_ammo
+		_finger_gun_reloading = false
+		_finger_gun_busy = false
+
+		if debug_tech:
+			print("Finger gun reloaded. Ammo: ", _finger_gun_ammo, "/", finger_gun_max_ammo)
+
+		if _queued_finger_gun_fire:
+			_queued_finger_gun_fire = false
+			_play_finger_gun_fire_or_broken()
+			return
+
+		arms_anim.play(StringName(idle_arm_anim), finger_gun_blend_time)
 		return
 
-	_is_jabbing = false
+	if anim_name == StringName(finger_gun_fire_anim) or anim_name == StringName(finger_gun_broken_anim):
+		_finger_gun_busy = false
 
-	# If the player clicked during the jab, play the next jab now.
-	if _queued_jab:
-		_queued_jab = false
-		_play_next_jab()
+		if _queued_finger_gun_reload:
+			_queued_finger_gun_reload = false
+			_play_finger_gun_reload()
+			return
+
+		if _queued_finger_gun_fire:
+			_queued_finger_gun_fire = false
+			_play_finger_gun_fire_or_broken()
+			return
+
+		if _finger_gun_broken_idle:
+			arms_anim.play(StringName(finger_gun_broken_anim), finger_gun_blend_time)
+			return
+
+		arms_anim.play(StringName(idle_arm_anim), finger_gun_blend_time)
+		
+func _play_finger_gun_shot_sound() -> void:
+	if finger_gun_audio_player == null:
 		return
 
-	# Otherwise return to idle guard.
-	arms_anim.play(StringName(idle_arm_anim), punch_blend_time)
-
-func _play_random_punch_grunt() -> void:
-	if punch_grunt_player == null:
+	finger_gun_audio_player.play()
+	
+func _play_finger_gun_reload_sound() -> void:
+	if finger_gun_reload_audio_player == null:
 		return
 
-	if punch_grunts.is_empty():
-		return
-
-	var random_index := randi_range(0, punch_grunts.size() - 1)
-	punch_grunt_player.stream = punch_grunts[random_index]
-	punch_grunt_player.play()
-
+	finger_gun_reload_audio_player.play()	
+	
 func _update_landing_shadow() -> void:
 	if landing_shadow_ray == null or landing_shadow == null:
 		return
@@ -497,3 +574,47 @@ func _update_landing_shadow() -> void:
 	landing_shadow.scale = Vector3(shadow_scale, shadow_scale, shadow_scale)
 	# Align the shadow to the floor normal.
 	# landing_shadow.look_at(landing_shadow.global_position + hit_normal, Vector3.FORWARD)
+
+func _spawn_bullet_impact() -> void:
+	if bullet_hole_scene == null:
+		return
+
+	if cam == null:
+		return
+
+	var ray_origin := cam.global_position
+	var ray_end := ray_origin + (-cam.global_transform.basis.z * finger_gun_range)
+
+	var query := PhysicsRayQueryParameters3D.create(ray_origin, ray_end)
+	query.exclude = [self.get_rid()]
+	query.collide_with_bodies = true
+	query.collide_with_areas = false
+
+	var hit := get_world_3d().direct_space_state.intersect_ray(query)
+
+	if hit.is_empty():
+		return
+
+	var hit_position: Vector3 = hit["position"]
+	var hit_normal: Vector3 = hit["normal"]
+
+	var bullet_hole := bullet_hole_scene.instantiate() as Node3D
+	get_tree().current_scene.add_child(bullet_hole)
+
+	bullet_hole.global_position = hit_position + hit_normal * bullet_hole_surface_offset
+	bullet_hole.global_basis = _basis_from_surface_normal(hit_normal)
+
+	if bullet_hole_random_rotation:
+		bullet_hole.rotate_object_local(Vector3.FORWARD, randf_range(0.0, TAU))
+
+func _basis_from_surface_normal(normal: Vector3) -> Basis:
+	var z := normal.normalized()
+	var x := Vector3.UP.cross(z)
+
+	if x.length() < 0.001:
+		x = Vector3.RIGHT.cross(z)
+
+	x = x.normalized()
+	var y := z.cross(x).normalized()
+
+	return Basis(x, y, z).orthonormalized()

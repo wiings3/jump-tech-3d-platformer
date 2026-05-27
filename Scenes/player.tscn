@@ -1,16 +1,17 @@
-[gd_scene load_steps=17 format=3 uid="uid://b3fkrk02e0u8b"]
+[gd_scene load_steps=18 format=3 uid="uid://b3fkrk02e0u8b"]
 
 [ext_resource type="Script" uid="uid://bqqn83eoddunc" path="res://Scripts/player.gd" id="1_v0iea"]
 [ext_resource type="Script" uid="uid://dlu2bmfu1egy2" path="res://Scripts/tech_hud.gd" id="2_cvnsp"]
-[ext_resource type="AudioStream" uid="uid://cp22bimj6aaq3" path="res://Assets/SFX/Grunts/strenuous_grunts.wav" id="2_gymyn"]
-[ext_resource type="AudioStream" uid="uid://bw1h4fynvepuy" path="res://Assets/SFX/Grunts/strenuous_grunts_2.wav" id="3_pu2lt"]
+[ext_resource type="PackedScene" uid="uid://bjiv6tsjjfyhs" path="res://Scenes/bullet_hole.tscn" id="2_ukyrk"]
 [ext_resource type="AudioStream" uid="uid://ddexv51wf17ab" path="res://Assets/SFX/early.wav" id="3_x3wgy"]
 [ext_resource type="AudioStream" uid="uid://grbpjs1xnu15" path="res://Assets/SFX/good.wav" id="4_3smsa"]
-[ext_resource type="AudioStream" uid="uid://cbyqypfrtv2id" path="res://Assets/SFX/Grunts/strenuous_grunts_3.wav" id="4_ukyrk"]
 [ext_resource type="AudioStream" uid="uid://dpr7vvsrwhnef" path="res://Assets/SFX/great.wav" id="5_8erm5"]
 [ext_resource type="AudioStream" uid="uid://cncf258hko4a8" path="res://Assets/SFX/perfect.wav" id="6_f1ek2"]
 [ext_resource type="Shader" uid="uid://bt8rtadto7mcl" path="res://Scripts/Shaders/lightning_overlay.gdshader" id="7_3smsa"]
 [ext_resource type="PackedScene" uid="uid://n8ab68fxgck6" path="res://Scenes/arm_rig.tscn" id="8_8erm5"]
+[ext_resource type="Texture2D" uid="uid://cb73bqamwshsw" path="res://Assets/Textures/crosshair.png" id="9_pu2lt"]
+[ext_resource type="AudioStream" uid="uid://c11ax0yyvt4tm" path="res://Assets/SFX/Weapon/pew.wav" id="9_tx1dd"]
+[ext_resource type="AudioStream" uid="uid://buyvc4ocighjv" path="res://Assets/SFX/Weapon/knuckle_crack.wav" id="10_gymyn"]
 [ext_resource type="Texture2D" uid="uid://c7yo8irm56hbs" path="res://Assets/Textures/shadow.png" id="12_pu2lt"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_f60y1"]
@@ -36,7 +37,7 @@ albedo_texture = ExtResource("12_pu2lt")
 script = ExtResource("1_v0iea")
 tech_grace_after = 0.08
 tech_bounce_base = 6.0
-punch_grunts = Array[AudioStream]([ExtResource("2_gymyn"), ExtResource("3_pu2lt"), ExtResource("4_ukyrk")])
+bullet_hole_scene = ExtResource("2_ukyrk")
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="."]
 shape = SubResource("CapsuleShape3D_f60y1")
@@ -96,13 +97,15 @@ anchor_left = 0.5
 anchor_top = 0.5
 anchor_right = 0.5
 anchor_bottom = 0.5
-offset_left = -20.0
-offset_top = -11.5
-offset_right = 20.0
-offset_bottom = 11.5
+offset_left = -38.0
+offset_top = -45.5
+offset_right = 38.0
+offset_bottom = -22.5
 grow_horizontal = 2
 grow_vertical = 2
 text = "Tier Label"
+horizontal_alignment = 1
+vertical_alignment = 1
 
 [node name="LightningFX" type="ColorRect" parent="TechHUD/Root"]
 material = SubResource("ShaderMaterial_8erm5")
@@ -113,9 +116,34 @@ grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
 
+[node name="Crosshair" type="TextureRect" parent="TechHUD/Root"]
+texture_filter = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -8.75
+offset_top = -8.75
+offset_right = 8.75
+offset_bottom = 8.75
+grow_horizontal = 2
+grow_vertical = 2
+size_flags_horizontal = 4
+texture = ExtResource("9_pu2lt")
+expand_mode = 1
+
 [node name="SFX" type="AudioStreamPlayer" parent="TechHUD"]
 
 [node name="PunchGruntPlayer" type="AudioStreamPlayer" parent="."]
+volume_db = -10.0
+
+[node name="FingerGunAudioPlayer" type="AudioStreamPlayer" parent="."]
+stream = ExtResource("9_tx1dd")
+volume_db = -10.0
+
+[node name="FingerGunReloadAudioPlayer" type="AudioStreamPlayer" parent="."]
+stream = ExtResource("10_gymyn")
 volume_db = -10.0
 
 [node name="LandingShadow" type="MeshInstance3D" parent="."]
