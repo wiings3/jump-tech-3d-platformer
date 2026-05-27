@@ -1,13 +1,17 @@
-[gd_scene load_steps=11 format=3 uid="uid://b3fkrk02e0u8b"]
+[gd_scene load_steps=17 format=3 uid="uid://b3fkrk02e0u8b"]
 
 [ext_resource type="Script" uid="uid://bqqn83eoddunc" path="res://Scripts/player.gd" id="1_v0iea"]
 [ext_resource type="Script" uid="uid://dlu2bmfu1egy2" path="res://Scripts/tech_hud.gd" id="2_cvnsp"]
+[ext_resource type="AudioStream" uid="uid://cp22bimj6aaq3" path="res://Assets/SFX/Grunts/strenuous_grunts.wav" id="2_gymyn"]
+[ext_resource type="AudioStream" uid="uid://bw1h4fynvepuy" path="res://Assets/SFX/Grunts/strenuous_grunts_2.wav" id="3_pu2lt"]
 [ext_resource type="AudioStream" uid="uid://ddexv51wf17ab" path="res://Assets/SFX/early.wav" id="3_x3wgy"]
 [ext_resource type="AudioStream" uid="uid://grbpjs1xnu15" path="res://Assets/SFX/good.wav" id="4_3smsa"]
+[ext_resource type="AudioStream" uid="uid://cbyqypfrtv2id" path="res://Assets/SFX/Grunts/strenuous_grunts_3.wav" id="4_ukyrk"]
 [ext_resource type="AudioStream" uid="uid://dpr7vvsrwhnef" path="res://Assets/SFX/great.wav" id="5_8erm5"]
 [ext_resource type="AudioStream" uid="uid://cncf258hko4a8" path="res://Assets/SFX/perfect.wav" id="6_f1ek2"]
 [ext_resource type="Shader" uid="uid://bt8rtadto7mcl" path="res://Scripts/Shaders/lightning_overlay.gdshader" id="7_3smsa"]
 [ext_resource type="PackedScene" uid="uid://n8ab68fxgck6" path="res://Scenes/arm_rig.tscn" id="8_8erm5"]
+[ext_resource type="Texture2D" uid="uid://c7yo8irm56hbs" path="res://Assets/Textures/shadow.png" id="12_pu2lt"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_f60y1"]
 
@@ -19,16 +23,29 @@ shader_parameter/speed = 2.5
 shader_parameter/tint = Color(0.55, 0.85, 1, 1)
 shader_parameter/vignette = 0.6
 
+[sub_resource type="PlaneMesh" id="PlaneMesh_gymyn"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_gymyn"]
+transparency = 1
+cull_mode = 2
+shading_mode = 0
+albedo_color = Color(0, 0, 0, 0.60800004)
+albedo_texture = ExtResource("12_pu2lt")
+
 [node name="Player" type="CharacterBody3D"]
 script = ExtResource("1_v0iea")
 tech_grace_after = 0.08
 tech_bounce_base = 6.0
+punch_grunts = Array[AudioStream]([ExtResource("2_gymyn"), ExtResource("3_pu2lt"), ExtResource("4_ukyrk")])
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="."]
 shape = SubResource("CapsuleShape3D_f60y1")
 
 [node name="GroundProbe" type="RayCast3D" parent="."]
 target_position = Vector3(0, -10, 0)
+
+[node name="LandingShadowRay" type="RayCast3D" parent="."]
+target_position = Vector3(0, -20, 0)
 
 [node name="YawPivot" type="Node3D" parent="."]
 
@@ -38,7 +55,7 @@ target_position = Vector3(0, -10, 0)
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.6930847, 0)
 
 [node name="ArmRig" parent="YawPivot/PitchPivot" instance=ExtResource("8_8erm5")]
-transform = Transform3D(-1, 0, -8.742278e-08, 0, 1, 0, 8.742278e-08, 0, -1, 0, -1.077, -0.07)
+transform = Transform3D(-1, 0, -8.742278e-08, 0, 1, 0, 8.742278e-08, 0, -1, 0, -1.077, -0.11)
 
 [node name="TechHUD" type="CanvasLayer" parent="."]
 script = ExtResource("2_cvnsp")
@@ -47,8 +64,7 @@ sfx_early = ExtResource("3_x3wgy")
 sfx_good = ExtResource("4_3smsa")
 sfx_great = ExtResource("5_8erm5")
 sfx_perfect = ExtResource("6_f1ek2")
-sfx_volume_db = -15.0
-sfx_pitch_random = 0.0
+sfx_volume_db = -21.0
 
 [node name="Root" type="Node" parent="TechHUD"]
 
@@ -98,3 +114,10 @@ grow_vertical = 2
 mouse_filter = 2
 
 [node name="SFX" type="AudioStreamPlayer" parent="TechHUD"]
+
+[node name="PunchGruntPlayer" type="AudioStreamPlayer" parent="."]
+volume_db = -10.0
+
+[node name="LandingShadow" type="MeshInstance3D" parent="."]
+mesh = SubResource("PlaneMesh_gymyn")
+surface_material_override/0 = SubResource("StandardMaterial3D_gymyn")
