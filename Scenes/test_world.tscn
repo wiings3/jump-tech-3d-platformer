@@ -1,0 +1,91 @@
+[gd_scene load_steps=9 format=3 uid="uid://pqb807c4k7ii"]
+
+[ext_resource type="PackedScene" uid="uid://b3fkrk02e0u8b" path="res://Scenes/player.tscn" id="1_skmq4"]
+
+[sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_skmq4"]
+sky_horizon_color = Color(0.59607846, 0.654902, 0.67058825, 1)
+ground_bottom_color = Color(0.59607846, 0.654902, 0.67058825, 1)
+ground_horizon_color = Color(0.59607846, 0.654902, 0.67058825, 1)
+
+[sub_resource type="Sky" id="Sky_au00k"]
+sky_material = SubResource("ProceduralSkyMaterial_skmq4")
+
+[sub_resource type="Environment" id="Environment_707cn"]
+background_mode = 2
+sky = SubResource("Sky_au00k")
+
+[sub_resource type="BoxMesh" id="BoxMesh_bwha0"]
+size = Vector3(100, 0.2, 100)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_skmq4"]
+albedo_color = Color(0.07472216, 0.21149227, 0.07426826, 1)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_au00k"]
+size = Vector3(100, 0.2, 100)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_au00k"]
+albedo_color = Color(1, 0.94509804, 0.50980395, 1)
+
+[node name="TestWorld" type="Node3D"]
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_707cn")
+
+[node name="Sun" type="DirectionalLight3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, -0.6765933, 0.736357, 0, -0.736357, -0.6765933, 0, 10.414068, -4.9225807)
+shadow_enabled = true
+
+[node name="TestPlatforms" type="Node3D" parent="."]
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="TestPlatforms"]
+mesh = SubResource("BoxMesh_bwha0")
+surface_material_override/0 = SubResource("StandardMaterial3D_skmq4")
+
+[node name="StaticBody3D" type="StaticBody3D" parent="TestPlatforms/MeshInstance3D"]
+metadata/_edit_lock_ = true
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="TestPlatforms/MeshInstance3D/StaticBody3D"]
+shape = SubResource("BoxShape3D_au00k")
+metadata/_edit_lock_ = true
+
+[node name="MeshInstance3D2" type="MeshInstance3D" parent="TestPlatforms"]
+transform = Transform3D(0.08525634, 0, 0, 0, 2.2967072, 0, 0, 0, 0.051001407, 0, 7.74095, 0)
+mesh = SubResource("BoxMesh_bwha0")
+surface_material_override/0 = SubResource("StandardMaterial3D_au00k")
+
+[node name="StaticBody3D" type="StaticBody3D" parent="TestPlatforms/MeshInstance3D2"]
+metadata/_edit_lock_ = true
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="TestPlatforms/MeshInstance3D2/StaticBody3D"]
+shape = SubResource("BoxShape3D_au00k")
+metadata/_edit_lock_ = true
+
+[node name="MeshInstance3D3" type="MeshInstance3D" parent="TestPlatforms"]
+transform = Transform3D(0.08525634, 0, 0, 0, 2.2967072, 0, 0, 0, 0.051001407, 10.315926, 14.870619, 0)
+mesh = SubResource("BoxMesh_bwha0")
+surface_material_override/0 = SubResource("StandardMaterial3D_au00k")
+
+[node name="StaticBody3D" type="StaticBody3D" parent="TestPlatforms/MeshInstance3D3"]
+metadata/_edit_lock_ = true
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="TestPlatforms/MeshInstance3D3/StaticBody3D"]
+shape = SubResource("BoxShape3D_au00k")
+metadata/_edit_lock_ = true
+
+[node name="MeshInstance3D4" type="MeshInstance3D" parent="TestPlatforms"]
+transform = Transform3D(0.08525634, 0, 0, 0, 2.2967072, 0, 0, 0, 0.051001407, 14.320902, 25.780354, 14.6595)
+mesh = SubResource("BoxMesh_bwha0")
+surface_material_override/0 = SubResource("StandardMaterial3D_au00k")
+
+[node name="StaticBody3D" type="StaticBody3D" parent="TestPlatforms/MeshInstance3D4"]
+metadata/_edit_lock_ = true
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="TestPlatforms/MeshInstance3D4/StaticBody3D"]
+shape = SubResource("BoxShape3D_au00k")
+metadata/_edit_lock_ = true
+
+[node name="Player" parent="." instance=ExtResource("1_skmq4")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 14.058565, 27.010025, 15.501232)
+tech_grace_after = 0.25
+tech_buffer_before = 0.2
+tech_preserve_time = 0.28

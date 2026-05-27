@@ -1,0 +1,100 @@
+[gd_scene load_steps=11 format=3 uid="uid://b3fkrk02e0u8b"]
+
+[ext_resource type="Script" uid="uid://bqqn83eoddunc" path="res://Scripts/player.gd" id="1_v0iea"]
+[ext_resource type="Script" uid="uid://dlu2bmfu1egy2" path="res://Scripts/tech_hud.gd" id="2_cvnsp"]
+[ext_resource type="AudioStream" uid="uid://ddexv51wf17ab" path="res://Assets/SFX/early.wav" id="3_x3wgy"]
+[ext_resource type="AudioStream" uid="uid://grbpjs1xnu15" path="res://Assets/SFX/good.wav" id="4_3smsa"]
+[ext_resource type="AudioStream" uid="uid://dpr7vvsrwhnef" path="res://Assets/SFX/great.wav" id="5_8erm5"]
+[ext_resource type="AudioStream" uid="uid://cncf258hko4a8" path="res://Assets/SFX/perfect.wav" id="6_f1ek2"]
+[ext_resource type="Shader" uid="uid://bt8rtadto7mcl" path="res://Scripts/Shaders/lightning_overlay.gdshader" id="7_3smsa"]
+[ext_resource type="PackedScene" uid="uid://n8ab68fxgck6" path="res://Scenes/arm_rig.tscn" id="8_8erm5"]
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_f60y1"]
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_8erm5"]
+shader = ExtResource("7_3smsa")
+shader_parameter/intensity = 0.0
+shader_parameter/zoom = 1.122000029545
+shader_parameter/speed = 2.5
+shader_parameter/tint = Color(0.55, 0.85, 1, 1)
+shader_parameter/vignette = 0.6
+
+[node name="Player" type="CharacterBody3D"]
+script = ExtResource("1_v0iea")
+tech_grace_after = 0.08
+tech_bounce_base = 6.0
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+shape = SubResource("CapsuleShape3D_f60y1")
+
+[node name="GroundProbe" type="RayCast3D" parent="."]
+target_position = Vector3(0, -10, 0)
+
+[node name="YawPivot" type="Node3D" parent="."]
+
+[node name="PitchPivot" type="Node3D" parent="YawPivot"]
+
+[node name="Camera3D" type="Camera3D" parent="YawPivot/PitchPivot"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.6930847, 0)
+
+[node name="ArmRig" parent="YawPivot/PitchPivot" instance=ExtResource("8_8erm5")]
+transform = Transform3D(-1, 0, -8.742278e-08, 0, 1, 0, 8.742278e-08, 0, -1, 0, -1.077, -0.07)
+
+[node name="TechHUD" type="CanvasLayer" parent="."]
+script = ExtResource("2_cvnsp")
+player_path = NodePath("..")
+sfx_early = ExtResource("3_x3wgy")
+sfx_good = ExtResource("4_3smsa")
+sfx_great = ExtResource("5_8erm5")
+sfx_perfect = ExtResource("6_f1ek2")
+sfx_volume_db = -15.0
+sfx_pitch_random = 0.0
+
+[node name="Root" type="Node" parent="TechHUD"]
+
+[node name="ApproachLabel" type="Label" parent="TechHUD/Root"]
+anchors_preset = 5
+anchor_left = 0.5
+anchor_right = 0.5
+offset_left = -20.0
+offset_top = 13.0
+offset_right = 20.0
+offset_bottom = 36.0
+grow_horizontal = 2
+text = "Approach Label"
+
+[node name="ApproachBar" type="ProgressBar" parent="TechHUD/Root"]
+anchors_preset = 5
+anchor_left = 0.5
+anchor_right = 0.5
+offset_left = -2.0
+offset_top = 44.0
+offset_right = 2.0
+offset_bottom = 71.0
+grow_horizontal = 2
+max_value = 1.0
+
+[node name="TierLabel" type="Label" parent="TechHUD/Root"]
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -20.0
+offset_top = -11.5
+offset_right = 20.0
+offset_bottom = 11.5
+grow_horizontal = 2
+grow_vertical = 2
+text = "Tier Label"
+
+[node name="LightningFX" type="ColorRect" parent="TechHUD/Root"]
+material = SubResource("ShaderMaterial_8erm5")
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="SFX" type="AudioStreamPlayer" parent="TechHUD"]
