@@ -15,12 +15,48 @@ signal tech_result(tier: String, quality: float, impulse: float)
 @export var accel_air := 12.0
 ## How quickly the player slows down on the ground when no movement input is pressed.
 @export var friction_ground := 18.0
+## How quickly extra earned speed above normal movement speed bleeds away on the ground.
+@export var ground_momentum_decay := 5.0
+## How quickly extra earned speed above normal movement speed bleeds away in the air.
+@export var air_momentum_decay := 2.0
+## Maximum horizontal speed the player can reach from sprinting, techs, slides, and momentum chaining.
+@export var max_horizontal_speed := 65.0
 ## Upward velocity applied when the player jumps.
 @export var jump_velocity := 7.5
 ## Maximum downward falling speed.
 @export var max_fall_speed := 45.0
 ## Multiplier applied to upward velocity when jump is released early. Set to 1.0 to disable tap-short-jump.
 @export var cut_jump_factor := 0.55 # set to 1.0 to disable tap-short-jump
+
+@export_category("Slide")
+## How long the slide lasts before ending automatically.
+@export var slide_duration := 0.85
+## Time before landing where a slide input is buffered and starts immediately on touchdown.
+@export var slide_buffer_before := 0.12
+## Horizontal speeds below this are treated as no meaningful slide momentum. The slide still starts, but it will not move the player.
+@export var slide_min_momentum_speed := 0.05
+## How much speed the slide loses per second. Lower values preserve momentum longer.
+@export var slide_speed_decay := 1.5
+## Extra upward velocity used when jumping out of a perfectly timed slide.
+@export var slide_jump_up_velocity := 9.0
+## Lowest momentum multiplier used when slide-jumping with poor timing.
+@export var slide_jump_min_multiplier := 1.0
+## Highest momentum multiplier used when slide-jumping with perfect timing.
+@export var slide_jump_max_multiplier := 1.25
+## Time before the slide ends where the jump is considered perfect.
+@export var slide_perfect_window := 0.12
+## Larger timing window used to calculate partial slide-jump quality.
+@export var slide_good_window := 0.45
+## Higher values make bad slide-jump timing weaker and perfect timing more rewarding.
+@export var slide_quality_exponent := 1.5
+## Time after a slide jump where movement smoothing is reduced so the boost is preserved.
+@export var slide_jump_preserve_time := 0.25
+## Short time after a slide jump where normal air movement cannot immediately dampen the boost.
+@export var slide_jump_lock_time := 0.06
+## How far the camera/arms lower while sliding. Negative values make the player feel shorter.
+@export var slide_camera_y_offset := -0.75
+## How quickly the camera/arms move into and out of slide height.
+@export var slide_camera_lerp_speed := 14.0
 
 @export_category("Tap Tech")
 ## Seconds after landing where pressing jump performs a tech instead of a normal jump.
@@ -47,11 +83,11 @@ signal tech_result(tier: String, quality: float, impulse: float)
 ## Controls how strongly timing quality affects tech power. Higher values make perfect timing more important.
 @export var quality_exponent := 1.8         # higher = more reward for perfect timing
 ## Time after a tech where acceleration and friction are reduced to preserve the launch burst.
-@export var tech_preserve_time := 0.22      # prevents burst being instantly smoothed away
+@export var tech_preserve_time := 0.30      # prevents burst being instantly smoothed away
 ## Ground acceleration multiplier during the tech preserve window.
-@export var preserve_accel_scale := 0.20
+@export var preserve_accel_scale := 0.15
 ## Ground friction multiplier during the tech preserve window.
-@export var preserve_friction_scale := 0.25
+@export var preserve_friction_scale := 0.10
 # NEW: Always add a vertical "bounce" on tech, more if looking up
 ## Base upward velocity added by every successful tech.
 @export var tech_bounce_base := 2.2         # vertical velocity added on every tech (always)
@@ -90,6 +126,10 @@ signal tech_result(tier: String, quality: float, impulse: float)
 @export_category("Debug")
 ## Enables debug print messages for controller, landing, buffer, and tech behavior.
 @export var debug_tech := true              # TRUE by default so prints show
+## Shows useful player movement/debug values on screen.
+@export var show_debug_hud := true
+
+@onready var debug_label: Label = $DebugCanvas/DebugLabel
 
 @export_category("Feedback")
 ## Distance from the ground where the landing approach feedback starts appearing.
@@ -144,6 +184,16 @@ var _gravity := 24.0
 # Event flags (reliable)
 var _jump_pressed_event := false
 var _jump_released_event := false
+var _slide_pressed_event := false
+
+# Slide state
+var _is_sliding := false
+var _slide_elapsed := 0.0
+var _slide_dir: Vector3 = Vector3.ZERO
+var _slide_speed := 0.0
+var _standing_yaw_pivot_y := 0.0
+var _slide_jump_lock_timer := 0.0
+var _slide_buffer_timer := 0.0
 
 # Landing + tech state
 var _was_on_floor := false
@@ -163,6 +213,8 @@ var _approach_smoothed := 0.0      # smoothing for approach meter
 func _ready() -> void:
 	_gravity = float(ProjectSettings.get_setting("physics/3d/default_gravity"))
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+	_standing_yaw_pivot_y = yaw_pivot.position.y
 
 	_finger_gun_ammo = finger_gun_max_ammo
 
@@ -187,6 +239,10 @@ func _input(event: InputEvent) -> void:
 	if event.is_action_released("jump"):
 		_jump_released_event = true
 
+	if event.is_action_pressed("slide"):
+		_slide_pressed_event = true
+		_slide_buffer_timer = slide_buffer_before
+
 	if event.is_action_pressed("attack"):
 		_request_finger_gun_fire()
 
@@ -205,7 +261,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		Input.mouse_mode = (
 			Input.MOUSE_MODE_VISIBLE
 			if Input.mouse_mode == Input.MOUSE_MODE_CAPTURED
-			else Input.MOUSE_MODE_CAPTURED
+			else Input.mouse_mode == Input.MOUSE_MODE_CAPTURED
 		)
 
 func _physics_process(delta: float) -> void:
@@ -217,6 +273,13 @@ func _physics_process(delta: float) -> void:
 	_tech_buffer_timer = maxf(0.0, _tech_buffer_timer - delta)
 	_tech_buffer_cd = maxf(0.0, _tech_buffer_cd - delta)
 
+	_slide_jump_lock_timer = maxf(0.0, _slide_jump_lock_timer - delta)
+	_slide_buffer_timer = maxf(0.0, _slide_buffer_timer - delta)
+
+	if _is_sliding:
+		_slide_elapsed += delta
+	_update_slide_visuals(delta)
+	
 	_update_landing_approach_feedback()
 	
 	_update_landing_shadow()
@@ -238,12 +301,21 @@ func _physics_process(delta: float) -> void:
 	# Floor state BEFORE movement
 	var on_floor := is_on_floor()
 
+	# Start slide while already grounded
+	if _has_slide_request() and on_floor and not _is_sliding:
+		if _try_start_slide(desired_dir):
+			_consume_slide_request()
+
 	# Jump logic:
 	# - If we are in the tech window, a jump tap triggers TECH (not a normal jump).
 	# - Otherwise, normal jump if grounded.
 	# - If in air and falling, a jump tap buffers tech for a short time before landing.
 	if _jump_pressed_event:
-		if on_floor and _tech_window_timer > 0.0 and _tech_press_cd <= 0.0:
+		if _is_sliding and on_floor:
+			_do_slide_jump()
+			on_floor = false
+			_jump_pressed_event = false
+		elif on_floor and _tech_window_timer > 0.0 and _tech_press_cd <= 0.0:
 			_do_tap_tech()
 			# consume the press so it doesn't also jump
 			_jump_pressed_event = false
@@ -270,19 +342,53 @@ func _physics_process(delta: float) -> void:
 	var accel := accel_ground if on_floor else accel_air
 	var friction := friction_ground
 
-	# Preserve burst feel briefly after tech
-	if on_floor and _preserve_timer > 0.0:
+	# Preserve burst feel briefly after tech or slide jump
+	if _preserve_timer > 0.0:
 		accel *= preserve_accel_scale
-		friction *= preserve_friction_scale
+		if on_floor:
+			friction *= preserve_friction_scale
 
-	var target_vel := desired_dir * target_speed
-	velocity.x = move_toward(velocity.x, target_vel.x, accel * delta)
-	velocity.z = move_toward(velocity.z, target_vel.z, accel * delta)
+	if _slide_jump_lock_timer > 0.0:
+		# Preserve the slide-jump burst briefly so it feels like a real tech.
+		pass
+	elif _is_sliding and on_floor:
+		_slide_speed = maxf(0.0, _slide_speed - slide_speed_decay * delta)
 
-	if on_floor and desired_dir.length() < 0.001:
-		var f := friction * delta
-		velocity.x = move_toward(velocity.x, 0.0, f)
-		velocity.z = move_toward(velocity.z, 0.0, f)
+		velocity.x = _slide_dir.x * _slide_speed
+		velocity.z = _slide_dir.z * _slide_speed
+	else:
+		var horizontal_velocity := Vector3(velocity.x, 0.0, velocity.z)
+		var horizontal_speed := horizontal_velocity.length()
+
+		if desired_dir.length() > 0.001:
+			# Normal movement speed is only the baseline.
+			# If the player has earned extra momentum, preserve it briefly, then bleed it back toward normal speed.
+			if horizontal_speed <= target_speed:
+				var target_vel := desired_dir * target_speed
+				velocity.x = move_toward(velocity.x, target_vel.x, accel * delta)
+				velocity.z = move_toward(velocity.z, target_vel.z, accel * delta)
+			else:
+				var current_dir := horizontal_velocity.normalized()
+				var steer_strength := clampf(accel * delta / horizontal_speed, 0.0, 1.0)
+				var new_dir := current_dir.slerp(desired_dir.normalized(), steer_strength).normalized()
+
+				var preserved_speed := horizontal_speed
+
+				if _preserve_timer <= 0.0:
+					var decay := ground_momentum_decay if on_floor else air_momentum_decay
+					preserved_speed = move_toward(preserved_speed, target_speed, decay * delta)
+
+				velocity.x = new_dir.x * preserved_speed
+				velocity.z = new_dir.z * preserved_speed
+		else:
+			# No input should not kill airborne momentum.
+			# Ground friction still slows the player when grounded.
+			if on_floor:
+				var f := friction * delta
+				velocity.x = move_toward(velocity.x, 0.0, f)
+				velocity.z = move_toward(velocity.z, 0.0, f)
+
+	_cap_horizontal_speed()
 
 	# Move + landing detect
 	_prev_vel_y = velocity.y
@@ -290,8 +396,18 @@ func _physics_process(delta: float) -> void:
 	move_and_slide()
 	on_floor = is_on_floor()
 
+	var just_landed := (not _was_on_floor) and on_floor
+
+	# Start buffered slide immediately on touchdown.
+	if just_landed and _has_slide_request() and not _is_sliding:
+		if _try_start_slide(desired_dir):
+			_consume_slide_request()
+
+	if _is_sliding and ((not on_floor) or _slide_elapsed >= slide_duration):
+		_end_slide()
+
 	# Just landed?
-	if (not _was_on_floor) and on_floor:
+	if just_landed:
 		_last_impact_speed = maxf(0.0, -_prev_vel_y)
 
 		# Only allow tech window/tech buffer if the landing had enough impact
@@ -322,10 +438,13 @@ func _physics_process(delta: float) -> void:
 		else:
 			_tech_window_timer = 0.0
 			_tech_buffer_timer = 0.0
-
+			
+	_update_debug_hud()
+	
 	# Clear one-frame flags
 	_jump_pressed_event = false
 	_jump_released_event = false
+	_slide_pressed_event = false
 
 func _do_tap_tech(raw_quality_override: float = -1.0) -> void:
 	# Anti-spam cooldown
@@ -376,8 +495,9 @@ func _do_tap_tech(raw_quality_override: float = -1.0) -> void:
 	# Apply horizontal impulse
 	velocity.x += horiz_dir.x * impulse
 	velocity.z += horiz_dir.z * impulse
+	_cap_horizontal_speed()
 
-	# NEW: Always add a vertical bounce, more if looking up
+	# NEW: Always add a vertical "bounce", more if looking up
 	var up_factor := clampf(cam_fwd.y, 0.0, 1.0) # 0 if not looking up, 1 if looking straight up
 	var bounce := tech_bounce_base + up_factor * tech_bounce_up_bonus
 	bounce *= lerpf(1.0, 1.0 + tech_bounce_quality_scale, quality) # slightly more bounce on better timing
@@ -394,6 +514,17 @@ func _do_tap_tech(raw_quality_override: float = -1.0) -> void:
 
 	if debug_tech:
 		print("🔥 TECH ", tier, " impulse=", impulse, " bounce=", bounce, " quality=", raw_quality, " up_factor=", up_factor)
+
+func _cap_horizontal_speed() -> void:
+	var horizontal_velocity := Vector3(velocity.x, 0.0, velocity.z)
+	var horizontal_speed := horizontal_velocity.length()
+
+	if horizontal_speed <= max_horizontal_speed:
+		return
+
+	var capped_velocity := horizontal_velocity.normalized() * max_horizontal_speed
+	velocity.x = capped_velocity.x
+	velocity.z = capped_velocity.z
 
 func _update_landing_approach_feedback() -> void:
 	# Only show while falling
@@ -423,6 +554,95 @@ func _update_landing_approach_feedback() -> void:
 	# Smooth for readability
 	_approach_smoothed = lerpf(_approach_smoothed, t, 16.0 * get_physics_process_delta_time())
 	emit_signal("landing_approach", _approach_smoothed)
+
+func _has_slide_request() -> bool:
+	return _slide_pressed_event or _slide_buffer_timer > 0.0
+
+func _consume_slide_request() -> void:
+	_slide_pressed_event = false
+	_slide_buffer_timer = 0.0
+
+func _try_start_slide(desired_dir: Vector3) -> bool:
+	var horizontal_velocity: Vector3 = Vector3(velocity.x, 0.0, velocity.z)
+	var current_speed: float = horizontal_velocity.length()
+
+	if horizontal_velocity.length() > slide_min_momentum_speed:
+		_slide_dir = horizontal_velocity.normalized()
+	elif desired_dir.length() > 0.001:
+		_slide_dir = desired_dir.normalized()
+	else:
+		var yaw_fwd := -yaw_pivot.global_transform.basis.z
+		_slide_dir = Vector3(yaw_fwd.x, 0.0, yaw_fwd.z)
+
+		if _slide_dir.length() > 0.001:
+			_slide_dir = _slide_dir.normalized()
+		else:
+			_slide_dir = Vector3.ZERO
+
+	_is_sliding = true
+	_slide_elapsed = 0.0
+	_slide_speed = current_speed if current_speed > slide_min_momentum_speed else 0.0
+
+	if debug_tech:
+		print("Slide started. Preserving speed: ", _slide_speed)
+
+	return true
+
+func _do_slide_jump() -> void:
+	if not _is_sliding:
+		return
+
+	var quality: float = _get_slide_jump_quality()
+	var multiplier: float = lerpf(slide_jump_min_multiplier, slide_jump_max_multiplier, quality)
+	var final_speed: float = _slide_speed * multiplier
+	var up_velocity: float = lerpf(jump_velocity, slide_jump_up_velocity, quality)
+	var tier: String = _get_slide_jump_tier(quality)
+
+	velocity.x = _slide_dir.x * final_speed
+	velocity.z = _slide_dir.z * final_speed
+	velocity.y = up_velocity
+	_cap_horizontal_speed()
+
+	_slide_jump_lock_timer = slide_jump_lock_time
+	_preserve_timer = maxf(_preserve_timer, slide_jump_preserve_time)
+
+	_end_slide()
+
+	if debug_tech:
+		print("Slide Jump ", tier, " quality=", quality, " multiplier=", multiplier, " final_speed=", final_speed, " up_velocity=", up_velocity)
+
+func _get_slide_jump_quality() -> float:
+	if slide_duration <= 0.0:
+		return 0.0
+
+	var time_until_slide_end: float = slide_duration - _slide_elapsed
+
+	if time_until_slide_end <= slide_perfect_window:
+		return 1.0
+
+	if time_until_slide_end >= slide_good_window:
+		return 0.0
+
+	var window_size: float = maxf(slide_good_window - slide_perfect_window, 0.001)
+	var raw_quality: float = 1.0 - clampf((time_until_slide_end - slide_perfect_window) / window_size, 0.0, 1.0)
+
+	return pow(raw_quality, slide_quality_exponent)
+
+func _get_slide_jump_tier(quality: float) -> String:
+	if quality >= 0.90:
+		return "PERFECT"
+	elif quality >= 0.65:
+		return "GREAT"
+	elif quality >= 0.35:
+		return "GOOD"
+
+	return "WEAK"
+
+func _end_slide() -> void:
+	_is_sliding = false
+	_slide_elapsed = 0.0
+	_slide_dir = Vector3.ZERO
+	_slide_speed = 0.0
 
 func _request_finger_gun_fire() -> void:
 	if arms_anim == null:
@@ -618,3 +838,63 @@ func _basis_from_surface_normal(normal: Vector3) -> Basis:
 	var y := z.cross(x).normalized()
 
 	return Basis(x, y, z).orthonormalized()
+	
+func _update_slide_visuals(delta: float) -> void:
+	if yaw_pivot == null:
+		return
+
+	var target_y := _standing_yaw_pivot_y
+
+	if _is_sliding:
+		target_y = _standing_yaw_pivot_y + slide_camera_y_offset
+
+	yaw_pivot.position.y = lerpf(
+		yaw_pivot.position.y,
+		target_y,
+		slide_camera_lerp_speed * delta
+	)
+	
+func _update_debug_hud() -> void:
+	if debug_label == null:
+		return
+
+	debug_label.visible = show_debug_hud
+
+	if not show_debug_hud:
+		return
+
+	var horizontal_speed := Vector3(velocity.x, 0.0, velocity.z).length()
+	var total_speed := velocity.length()
+
+	var slide_time_left := 0.0
+	if _is_sliding:
+		slide_time_left = maxf(0.0, slide_duration - _slide_elapsed)
+
+	debug_label.text = (
+		"DEBUG\n"
+		+ "--------------------\n"
+		+ "Horizontal Speed: " + str(snappedf(horizontal_speed, 0.01)) + "\n"
+		+ "Max Horizontal Speed: " + str(max_horizontal_speed) + "\n"
+		+ "Total Speed: " + str(snappedf(total_speed, 0.01)) + "\n"
+		+ "Velocity: " + str(Vector3(
+			snappedf(velocity.x, 0.01),
+			snappedf(velocity.y, 0.01),
+			snappedf(velocity.z, 0.01)
+		)) + "\n"
+		+ "\n"
+		+ "On Floor: " + str(is_on_floor()) + "\n"
+		+ "Sliding: " + str(_is_sliding) + "\n"
+		+ "Slide Speed: " + str(snappedf(_slide_speed, 0.01)) + "\n"
+		+ "Slide Time Left: " + str(snappedf(slide_time_left, 0.01)) + "\n"
+		+ "Slide Buffer: " + str(snappedf(_slide_buffer_timer, 0.01)) + "\n"
+		+ "Slide Jump Lock: " + str(snappedf(_slide_jump_lock_timer, 0.01)) + "\n"
+		+ "\n"
+		+ "Tech Window: " + str(snappedf(_tech_window_timer, 0.01)) + "\n"
+		+ "Tech Buffer: " + str(snappedf(_tech_buffer_timer, 0.01)) + "\n"
+		+ "Preserve Timer: " + str(snappedf(_preserve_timer, 0.01)) + "\n"
+		+ "Last Impact Speed: " + str(snappedf(_last_impact_speed, 0.01)) + "\n"
+		+ "\n"
+		+ "Finger Gun Ammo: " + str(_finger_gun_ammo) + " / " + str(finger_gun_max_ammo) + "\n"
+		+ "Finger Gun Busy: " + str(_finger_gun_busy) + "\n"
+		+ "Finger Gun Broken: " + str(_finger_gun_broken_idle)
+	)
