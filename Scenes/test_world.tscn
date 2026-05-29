@@ -128,7 +128,7 @@ points = PackedVector3Array(-4.5, -5, -4.5, -4.5, -5, 4.5, -4.5, 5, -4.5, 4.5, -
 environment = SubResource("Environment_707cn")
 
 [node name="Sun" type="DirectionalLight3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, -0.6765933, 0.736357, 0, -0.736357, -0.6765933, 0, 10.414068, -4.9225807)
+transform = Transform3D(0.6310144, -0.099942796, -0.7693064, 0.77577114, 0.08129375, 0.625756, 0, -0.99166673, 0.12883025, 0, 62.257744, -4.9225807)
 shadow_enabled = true
 
 [node name="TestPlatforms" type="Node3D" parent="."]

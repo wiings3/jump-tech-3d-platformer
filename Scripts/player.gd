@@ -27,6 +27,8 @@ signal tech_result(tier: String, quality: float, impulse: float)
 @export var max_fall_speed := 45.0
 ## Multiplier applied to upward velocity when jump is released early. Set to 1.0 to disable tap-short-jump.
 @export var cut_jump_factor := 0.55 # set to 1.0 to disable tap-short-jump
+## Gravity Multiplier
+@export var gravity_multiplier := 1.4
 
 @export_category("Slide")
 ## How long the slide lasts before ending automatically.
@@ -96,6 +98,26 @@ signal tech_result(tier: String, quality: float, impulse: float)
 ## How much better tech timing increases the vertical bounce. Set to 0.0 to disable timing-based bounce scaling.
 @export var tech_bounce_quality_scale := 0.25 # extra bounce scaling with timing quality (0 = no scaling)
 
+@export_category("Wall Tech")
+## Seconds after touching a wall where a wall tech can be performed.
+@export var wall_tech_window := 0.12
+## Minimum dot product used to determine whether a surface is a wall.
+@export var wall_min_verticality := 0.7
+## Upward velocity added during a wall tech.
+@export var wall_tech_up_velocity := 4.5
+## How strongly the wall normal influences the redirect.
+@export var wall_tech_normal_strength := 0.85
+## How much speed is preserved.
+@export var wall_tech_speed_preserve := 1.0
+## Short time after wall tech where air steering is reduced so W doesn't instantly cancel the redirect.
+@export var wall_tech_input_lock_time := 0.08
+## Seconds before wall contact where pressing jump can buffer a wall tech.
+@export var wall_tech_buffer_before := 0.10
+## Minimum time between wall tech buffer presses so it cannot be spam-refreshed constantly.
+@export var wall_tech_buffer_press_cooldown := 0.10
+## Tiny freeze after pressing wall tech before the redirect launches.
+@export var wall_tech_freeze_time := 0.055
+
 @export_category("Landing Shadow")
 ## Maximum distance the landing shadow ray checks below the player.
 @export var shadow_max_distance := 20.0
@@ -136,7 +158,13 @@ signal tech_result(tier: String, quality: float, impulse: float)
 @export var approach_show_distance := 2.2   # meters: start showing landing indicator
 ## Distance from the ground where the landing approach feedback is considered fully active.
 @export var approach_full_distance := 0.35  # meters: considered "very close" (meter ~1.0)
-
+@export var base_fov := 75.0
+@export var max_speed_fov := 92.0
+@export var fov_speed_start := 18.0
+@export var fov_speed_full := 65.0
+@export var fov_lerp_speed := 10.0
+@export var wall_tech_fov_bonus := 8.0
+@export var wall_tech_fov_time := 0.12
 @onready var yaw_pivot: Node3D = $YawPivot
 @onready var pitch_pivot: Node3D = $YawPivot/PitchPivot
 @onready var cam: Camera3D = $YawPivot/PitchPivot/Camera3D
@@ -203,15 +231,28 @@ var _tech_window_timer := 0.0      # counts down after landing
 var _tech_press_cd := 0.0          # cooldown so spamming doesn't brute-force
 var _last_impact_speed := 0.0      # impact speed from most recent landing
 
+# Wall Tech
+var _wall_tech_timer := 0.0
+var _last_wall_normal := Vector3.ZERO
+var _wall_tech_input_lock_timer := 0.0
+var _wall_tech_buffer_timer := 0.0
+var _wall_tech_buffer_cd := 0.0
+var _wall_tech_freeze_timer := 0.0
+var _wall_tech_pending := false
+var _wall_tech_stored_velocity := Vector3.ZERO
+var _wall_tech_stored_normal := Vector3.ZERO
+var _wall_tech_fov_timer := 0.0
+
 # buffer timers
 var _tech_buffer_timer := 0.0      # counts down after an air tap (buffered tech)
 var _tech_buffer_cd := 0.0         # limits air-tap spam
 
 var _preserve_timer := 0.0         # preserves burst feel briefly
 var _approach_smoothed := 0.0      # smoothing for approach meter
+var _pre_collision_velocity := Vector3.ZERO
 
 func _ready() -> void:
-	_gravity = float(ProjectSettings.get_setting("physics/3d/default_gravity"))
+	_gravity = float(ProjectSettings.get_setting("physics/3d/default_gravity")) * gravity_multiplier
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 	_standing_yaw_pivot_y = yaw_pivot.position.y
@@ -273,6 +314,13 @@ func _physics_process(delta: float) -> void:
 	_tech_buffer_timer = maxf(0.0, _tech_buffer_timer - delta)
 	_tech_buffer_cd = maxf(0.0, _tech_buffer_cd - delta)
 
+	_wall_tech_timer = maxf(_wall_tech_timer - delta, 0.0)
+	_wall_tech_input_lock_timer = maxf(_wall_tech_input_lock_timer - delta, 0.0)
+	_wall_tech_buffer_timer = maxf(_wall_tech_buffer_timer - delta, 0.0)
+	_wall_tech_buffer_cd = maxf(_wall_tech_buffer_cd - delta, 0.0)
+	_wall_tech_freeze_timer = maxf(_wall_tech_freeze_timer - delta, 0.0)
+	_wall_tech_fov_timer = maxf(_wall_tech_fov_timer - delta, 0.0)
+	
 	_slide_jump_lock_timer = maxf(0.0, _slide_jump_lock_timer - delta)
 	_slide_buffer_timer = maxf(0.0, _slide_buffer_timer - delta)
 
@@ -283,6 +331,23 @@ func _physics_process(delta: float) -> void:
 	_update_landing_approach_feedback()
 	
 	_update_landing_shadow()
+
+	# Wall-tech hit-stop / aim-stop:
+	# Freeze player physics briefly, but mouse look still works because camera input is handled in _unhandled_input().
+	if _wall_tech_pending:
+		velocity = _wall_tech_stored_velocity
+
+		if _wall_tech_freeze_timer <= 0.0:
+			_last_wall_normal = _wall_tech_stored_normal
+			_wall_tech_pending = false
+			_do_wall_tech()
+
+		_update_debug_hud()
+
+		_jump_pressed_event = false
+		_jump_released_event = false
+		_slide_pressed_event = false
+		return
 	
 	# Movement input
 	var move_input := Vector2.ZERO
@@ -314,21 +379,34 @@ func _physics_process(delta: float) -> void:
 		if _is_sliding and on_floor:
 			_do_slide_jump()
 			on_floor = false
-			_jump_pressed_event = false
+
 		elif on_floor and _tech_window_timer > 0.0 and _tech_press_cd <= 0.0:
 			_do_tap_tech()
-			# consume the press so it doesn't also jump
-			_jump_pressed_event = false
+
 		elif on_floor:
 			velocity.y = jump_velocity
-		else:
-			# tech buffer (tap in air shortly before landing)
-			if velocity.y < 0.0 and _tech_press_cd <= 0.0 and _tech_buffer_cd <= 0.0:
-				_tech_buffer_timer = tech_buffer_before
-				_tech_buffer_cd = tech_buffer_press_cooldown
-				if debug_tech:
-					print("🟨 TECH BUFFERED (air tap). buffer=", _tech_buffer_timer)
 
+		else:
+			if _wall_tech_timer > 0.0:
+				_start_wall_tech_freeze()
+
+			else:
+				if _wall_tech_buffer_cd <= 0.0:
+					_wall_tech_buffer_timer = wall_tech_buffer_before
+					_wall_tech_buffer_cd = wall_tech_buffer_press_cooldown
+
+					if debug_tech:
+						print("🟦 WALL TECH BUFFERED. buffer=", _wall_tech_buffer_timer)
+
+				if velocity.y < 0.0 and _tech_press_cd <= 0.0 and _tech_buffer_cd <= 0.0:
+					_tech_buffer_timer = tech_buffer_before
+					_tech_buffer_cd = tech_buffer_press_cooldown
+
+					if debug_tech:
+						print("🟨 TECH BUFFERED (air tap). buffer=", _tech_buffer_timer)
+
+		_jump_pressed_event = false
+				
 	# Variable jump (tap = shorter)
 	if _jump_released_event and velocity.y > 0.0:
 		velocity.y *= cut_jump_factor
@@ -341,7 +419,10 @@ func _physics_process(delta: float) -> void:
 	# Horizontal movement
 	var accel := accel_ground if on_floor else accel_air
 	var friction := friction_ground
-
+	
+	if _wall_tech_input_lock_timer > 0.0:
+		accel *= 0.05
+		
 	# Preserve burst feel briefly after tech or slide jump
 	if _preserve_timer > 0.0:
 		accel *= preserve_accel_scale
@@ -393,8 +474,30 @@ func _physics_process(delta: float) -> void:
 	# Move + landing detect
 	_prev_vel_y = velocity.y
 	_was_on_floor = on_floor
+	_pre_collision_velocity = velocity
 	move_and_slide()
 	on_floor = is_on_floor()
+
+	if not is_on_floor():
+		for i in get_slide_collision_count():
+			var collision := get_slide_collision(i)
+
+			if collision == null:
+				continue
+
+			var normal := collision.get_normal()
+
+			# Mostly vertical wall?
+			if abs(normal.y) < wall_min_verticality:
+				_last_wall_normal = normal
+				_wall_tech_timer = wall_tech_window
+
+				if _wall_tech_buffer_timer > 0.0:
+					_start_wall_tech_freeze()
+					_wall_tech_buffer_timer = 0.0
+
+				if debug_tech:
+					print("WALL CONTACT")
 
 	var just_landed := (not _was_on_floor) and on_floor
 
@@ -440,6 +543,7 @@ func _physics_process(delta: float) -> void:
 			_tech_buffer_timer = 0.0
 			
 	_update_debug_hud()
+	_update_camera_fov(delta)
 	
 	# Clear one-frame flags
 	_jump_pressed_event = false
@@ -514,6 +618,76 @@ func _do_tap_tech(raw_quality_override: float = -1.0) -> void:
 
 	if debug_tech:
 		print("🔥 TECH ", tier, " impulse=", impulse, " bounce=", bounce, " quality=", raw_quality, " up_factor=", up_factor)
+
+func _start_wall_tech_freeze() -> void:
+	if _wall_tech_pending:
+		return
+
+	_wall_tech_pending = true
+	_wall_tech_freeze_timer = wall_tech_freeze_time
+	_wall_tech_stored_velocity = _pre_collision_velocity
+	_wall_tech_stored_normal = _last_wall_normal
+
+	_wall_tech_timer = 0.0
+	_wall_tech_buffer_timer = 0.0
+
+	if debug_tech:
+		print("🧊 WALL TECH FREEZE time=", wall_tech_freeze_time)
+
+func _do_wall_tech() -> void:
+	var horizontal_velocity := Vector3(velocity.x, 0.0, velocity.z)
+	var current_speed := horizontal_velocity.length()
+
+	if current_speed < 0.1:
+		return
+
+	var wall_normal := Vector3(_last_wall_normal.x, 0.0, _last_wall_normal.z)
+
+	if wall_normal.length() < 0.001:
+		return
+
+	wall_normal = wall_normal.normalized()
+
+	# Use camera direction so the player controls the redirect.
+	var cam_fwd := -cam.global_transform.basis.z
+	var aim_dir := Vector3(cam_fwd.x, 0.0, cam_fwd.z)
+
+	if aim_dir.length() < 0.001:
+		aim_dir = horizontal_velocity.normalized()
+	else:
+		aim_dir = aim_dir.normalized()
+
+	# If the player aims into the wall, project that aim along the wall instead.
+	var into_wall_amount := aim_dir.dot(-wall_normal)
+
+	if into_wall_amount > 0.75:
+		# Looking almost directly into the wall.
+		# Kick straight backward off the wall.
+		aim_dir = wall_normal
+	elif into_wall_amount > 0.0:
+		# Looking partly into the wall.
+		# Slide the aim along the wall instead of letting the player tech into it.
+		aim_dir = (aim_dir + wall_normal * into_wall_amount).normalized()
+
+	# Add a small push away from the wall so you don't scrape/stick.
+	var redirect_dir := (aim_dir + wall_normal * 0.15).normalized()
+
+	var new_speed := current_speed * wall_tech_speed_preserve
+
+	velocity.x = redirect_dir.x * new_speed
+	velocity.z = redirect_dir.z * new_speed
+	velocity.y = maxf(velocity.y, 0.0) + wall_tech_up_velocity
+
+	_cap_horizontal_speed()
+
+	_wall_tech_timer = 0.0
+	_last_wall_normal = Vector3.ZERO
+	_preserve_timer = maxf(_preserve_timer, tech_preserve_time)
+	_wall_tech_input_lock_timer = wall_tech_input_lock_time
+	_wall_tech_fov_timer = wall_tech_fov_time
+	
+	if debug_tech:
+		print("🟦 WALL TECH speed=", current_speed, " redirect=", redirect_dir, " normal=", wall_normal)
 
 func _cap_horizontal_speed() -> void:
 	var horizontal_velocity := Vector3(velocity.x, 0.0, velocity.z)
@@ -854,6 +1028,22 @@ func _update_slide_visuals(delta: float) -> void:
 		slide_camera_lerp_speed * delta
 	)
 	
+func _update_camera_fov(delta: float) -> void:
+	if cam == null:
+		return
+
+	var horizontal_speed := Vector3(velocity.x, 0.0, velocity.z).length()
+	var speed_t := inverse_lerp(fov_speed_start, fov_speed_full, horizontal_speed)
+	speed_t = clampf(speed_t, 0.0, 1.0)
+
+	var target_fov := lerpf(base_fov, max_speed_fov, speed_t)
+
+	if _wall_tech_fov_timer > 0.0:
+		var wall_t := _wall_tech_fov_timer / wall_tech_fov_time
+		target_fov += wall_tech_fov_bonus * wall_t
+
+	cam.fov = lerpf(cam.fov, target_fov, fov_lerp_speed * delta)
+		
 func _update_debug_hud() -> void:
 	if debug_label == null:
 		return
@@ -888,6 +1078,10 @@ func _update_debug_hud() -> void:
 		+ "Slide Time Left: " + str(snappedf(slide_time_left, 0.01)) + "\n"
 		+ "Slide Buffer: " + str(snappedf(_slide_buffer_timer, 0.01)) + "\n"
 		+ "Slide Jump Lock: " + str(snappedf(_slide_jump_lock_timer, 0.01)) + "\n"
+		+ "Wall Tech: " + str(_wall_tech_timer > 0.0) + "\n"
+		+ "Wall Window: %.2f" % _wall_tech_timer + "\n"
+		+ "Wall Freeze: " + str(_wall_tech_pending) + "\n"
+		+ "Wall Freeze Timer: %.2f" % _wall_tech_freeze_timer + "\n"
 		+ "\n"
 		+ "Tech Window: " + str(snappedf(_tech_window_timer, 0.01)) + "\n"
 		+ "Tech Buffer: " + str(snappedf(_tech_buffer_timer, 0.01)) + "\n"
