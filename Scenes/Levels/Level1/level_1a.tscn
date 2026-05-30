@@ -1,0 +1,79 @@
+[gd_scene load_steps=9 format=3 uid="uid://y8vgvb5s2008"]
+
+[ext_resource type="PackedScene" uid="uid://b3fkrk02e0u8b" path="res://Scenes/player.tscn" id="1_wgeav"]
+
+[sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_wgeav"]
+sky_horizon_color = Color(0.38431373, 0.45490196, 0.54901963, 1)
+ground_bottom_color = Color(0.38431373, 0.45490196, 0.54901963, 1)
+ground_horizon_color = Color(0.38431373, 0.45490196, 0.54901963, 1)
+
+[sub_resource type="Sky" id="Sky_0njl8"]
+sky_material = SubResource("ProceduralSkyMaterial_wgeav")
+
+[sub_resource type="Environment" id="Environment_wgeav"]
+background_mode = 2
+sky = SubResource("Sky_0njl8")
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_e5tiq"]
+metallic_specular = 0.0
+uv1_scale = Vector3(40, 40, 40)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_tdi57"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_0njl8"]
+metallic_specular = 0.0
+uv1_scale = Vector3(40, 40, 40)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_wgeav"]
+size = Vector3(1, 7.9500732, 6.7625732)
+
+[node name="Level1A" type="Node3D"]
+
+[node name="Sun" type="DirectionalLight3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, -0.6704396, 0.7419641, 0, -0.7419641, -0.6704396, 0, 32.498272, 20.23168)
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_wgeav")
+
+[node name="Player" parent="." instance=ExtResource("1_wgeav")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5379944, -15.740322)
+
+[node name="CSGBox3D" type="CSGBox3D" parent="."]
+transform = Transform3D(50, 0, 0, 0, 300, 0, 0, 0, 50, 0, -150.462, 0)
+material = SubResource("StandardMaterial3D_e5tiq")
+
+[node name="StaticBody3D" type="StaticBody3D" parent="CSGBox3D"]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="CSGBox3D/StaticBody3D"]
+shape = SubResource("BoxShape3D_tdi57")
+
+[node name="CSGBox3D2" type="CSGBox3D" parent="."]
+transform = Transform3D(50, 0, 0, 0, -1.3113417e-05, -50, 0, 300, -2.1855694e-06, 0, -32.048843, -173.01299)
+material = SubResource("StandardMaterial3D_0njl8")
+
+[node name="StaticBody3D" type="StaticBody3D" parent="CSGBox3D2"]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="CSGBox3D2/StaticBody3D"]
+shape = SubResource("BoxShape3D_tdi57")
+
+[node name="CSGBox3D3" type="CSGBox3D" parent="."]
+transform = Transform3D(0.14849241, -0.7071067, 3.0908613e-08, 0, -4.371138e-08, -0.99999994, 0.14849241, 0.7071067, -3.0908613e-08, -21.638023, -3.6690855, -111.96816)
+size = Vector3(1, 7.9436035, 6.7663574)
+material = SubResource("StandardMaterial3D_0njl8")
+
+[node name="StaticBody3D" type="StaticBody3D" parent="CSGBox3D3"]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="CSGBox3D3/StaticBody3D"]
+transform = Transform3D(1, 0, 0, 0, 0.9999999, 7.1054274e-15, 0, 0, 1, -3.0517578e-05, -0.001625061, -0.0015268326)
+shape = SubResource("BoxShape3D_wgeav")
+
+[node name="CSGBox3D4" type="CSGBox3D" parent="."]
+transform = Transform3D(0.1818653, 0.49999994, -2.185569e-08, 0, -4.371138e-08, -0.99999994, -0.104999974, 0.8660253, -3.7855166e-08, 22.792583, -3.6690855, -137.23216)
+size = Vector3(1, 7.9436035, 6.7663574)
+material = SubResource("StandardMaterial3D_0njl8")
+
+[node name="StaticBody3D" type="StaticBody3D" parent="CSGBox3D4"]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="CSGBox3D4/StaticBody3D"]
+transform = Transform3D(1, 0, 0, 0, 0.9999999, 7.1054274e-15, 0, 0, 1, -3.0517578e-05, -0.001625061, -0.0015268326)
+shape = SubResource("BoxShape3D_wgeav")

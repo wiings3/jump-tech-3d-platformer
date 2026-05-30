@@ -133,6 +133,12 @@ signal tech_result(tier: String, quality: float, impulse: float)
 @export var air_dash_fov_bonus := 6.0
 ## How long the air dash FOV kick lasts.
 @export var air_dash_fov_time := 0.10
+## Upward velocity added to the dash when looking upward.
+@export var air_dash_up_velocity := 7.0
+## How much the camera's upward look affects vertical dash strength.
+@export var air_dash_up_look_strength := 1.0
+## Minimum upward look amount required before vertical dash starts helping.
+@export var air_dash_up_deadzone := 0.15
 
 @export_category("Landing Shadow")
 ## Maximum distance the landing shadow ray checks below the player.
@@ -632,11 +638,28 @@ func _try_air_dash(on_floor: bool) -> void:
 
 	_cap_horizontal_speed()
 
-	if velocity.y < 0.0:
-		velocity.y *= 0.35
+	# Add verticality when looking upward.
+	var cam_forward := -cam.global_transform.basis.z
+	var look_up_amount := clampf(cam_forward.y, 0.0, 1.0)
+
+	if look_up_amount > air_dash_up_deadzone:
+		var up_t := inverse_lerp(air_dash_up_deadzone, 1.0, look_up_amount)
+		up_t = clampf(up_t, 0.0, 1.0)
+
+		var added_up_velocity := air_dash_up_velocity * up_t * air_dash_up_look_strength
+
+		velocity.y = maxf(velocity.y, 0.0) + added_up_velocity
+	else:
+		if velocity.y < 0.0:
+			velocity.y *= 0.35
 
 	if debug_tech:
-		print("🟨 AIR DASH dir=", dash_dir, " speed=", Vector3(velocity.x, 0.0, velocity.z).length())
+		print(
+			"🟨 AIR DASH dir=", dash_dir,
+			" speed=", Vector3(velocity.x, 0.0, velocity.z).length(),
+			" look_up=", look_up_amount,
+			" vel_y=", velocity.y
+		)
 
 
 func _get_air_dash_direction() -> Vector3:

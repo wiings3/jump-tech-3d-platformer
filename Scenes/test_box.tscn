@@ -1,7 +1,8 @@
-[gd_scene load_steps=22 format=3 uid="uid://cvcqunpixx4hm"]
+[gd_scene load_steps=24 format=3 uid="uid://cvcqunpixx4hm"]
 
 [ext_resource type="Texture2D" uid="uid://bd7hygxvgreor" path="res://Assets/Textures/graybox.png" id="1_5ofxt"]
 [ext_resource type="PackedScene" uid="uid://b3fkrk02e0u8b" path="res://Scenes/player.tscn" id="2_lm1wa"]
+[ext_resource type="Shader" uid="uid://cg0ey781sov5v" path="res://Shaders/manga_post_process.gdshader" id="3_id1gk"]
 
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_lm1wa"]
 sky_horizon_color = Color(0.38431373, 0.45490196, 0.54901963, 1)
@@ -80,17 +81,30 @@ points = PackedVector3Array(-1, -15, -45, 1, -15, -45, -1, -15, 45, -1, 14.99999
 material = SubResource("StandardMaterial3D_id1gk")
 size = Vector3(15, 1, 15)
 
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_kqf73"]
+shader = ExtResource("3_id1gk")
+shader_parameter/enabled = true
+shader_parameter/inverted = false
+shader_parameter/grayscale = true
+shader_parameter/strength = 0.5
+shader_parameter/light = Color(1, 1, 1, 1)
+shader_parameter/dark = Color(0.27752772, 0.27752775, 0.27752766, 1)
+shader_parameter/dot_spread = 29.6
+shader_parameter/dot_size = 1.0
+shader_parameter/alpha_threshold = 0.0
+
 [node name="TestBox" type="Node3D"]
+
+[node name="Player" parent="." instance=ExtResource("2_lm1wa")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.1808891, 0)
+wall_tech_buffer_before = 5.0
+air_dash_up_velocity = 9.0
 
 [node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, -0.69364077, 0.7203212, 0, -0.7203212, -0.69364077, 0, 78.58044, -25.152933)
 
 [node name="WorldEnvironment" type="WorldEnvironment" parent="."]
 environment = SubResource("Environment_kqf73")
-
-[node name="Player" parent="." instance=ExtResource("2_lm1wa")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.1808891, 0)
-wall_tech_buffer_before = 5.0
 
 [node name="BoxMeshes" type="Node3D" parent="."]
 
@@ -487,3 +501,14 @@ skeleton = NodePath("../..")
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="ObstacleMeshes/PitObstacle/BoxMesh11/StaticBody3D"]
 shape = SubResource("ConvexPolygonShape3D_yyttj")
+
+[node name="CanvasLayer" type="CanvasLayer" parent="."]
+
+[node name="ColorRect" type="ColorRect" parent="CanvasLayer"]
+material = SubResource("ShaderMaterial_kqf73")
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2

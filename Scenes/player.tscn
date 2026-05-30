@@ -1,4 +1,4 @@
-[gd_scene load_steps=24 format=3 uid="uid://b3fkrk02e0u8b"]
+[gd_scene load_steps=26 format=3 uid="uid://b3fkrk02e0u8b"]
 
 [ext_resource type="Script" uid="uid://bqqn83eoddunc" path="res://Scripts/player.gd" id="1_v0iea"]
 [ext_resource type="Script" uid="uid://dlu2bmfu1egy2" path="res://Scripts/tech_hud.gd" id="2_cvnsp"]
@@ -16,6 +16,7 @@
 [ext_resource type="Texture2D" uid="uid://c7yo8irm56hbs" path="res://Assets/Textures/shadow.png" id="12_pu2lt"]
 [ext_resource type="Script" uid="uid://cfi7rak8ev4xx" path="res://Scripts/speed_lines_layer.gd" id="15_fd4e3"]
 [ext_resource type="Shader" uid="uid://wcxmoq3h1a30" path="res://Shaders/speed_lines.gdshader" id="15_h4iuc"]
+[ext_resource type="Shader" uid="uid://cg0ey781sov5v" path="res://Shaders/manga_post_process.gdshader" id="17_qqcod"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_f60y1"]
 
@@ -28,7 +29,7 @@ shader_parameter/enable_outline = true
 shader_parameter/outline_color = Color(0, 0, 0, 1)
 shader_parameter/outline_thickness = 0.6
 shader_parameter/enable_color_limit = true
-shader_parameter/color_levels = 32
+shader_parameter/color_levels = 8
 shader_parameter/enable_color_palette = true
 shader_parameter/color1 = Color(0.9019608, 0.9019608, 0.9254902, 1)
 shader_parameter/color2 = Color(0.75686276, 0.75686276, 0.8235294, 1)
@@ -69,6 +70,18 @@ shader_parameter/speedScale = 16.0
 shader_parameter/clipPosition = 0.2
 shader_parameter/line_alpha = 0.0
 shader_parameter/line_density = 0.02
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_igrcy"]
+shader = ExtResource("17_qqcod")
+shader_parameter/enabled = true
+shader_parameter/inverted = false
+shader_parameter/grayscale = true
+shader_parameter/strength = 0.5
+shader_parameter/light = Color(1, 1, 1, 1)
+shader_parameter/dark = Color(0.27752772, 0.27752775, 0.27752766, 1)
+shader_parameter/dot_spread = 29.6
+shader_parameter/dot_size = 1.0
+shader_parameter/alpha_threshold = 0.0
 
 [node name="Player" type="CharacterBody3D"]
 script = ExtResource("1_v0iea")
@@ -195,7 +208,6 @@ stream = ExtResource("10_gymyn")
 volume_db = -10.0
 
 [node name="LandingShadow" type="MeshInstance3D" parent="."]
-visible = false
 mesh = SubResource("PlaneMesh_gymyn")
 surface_material_override/0 = SubResource("StandardMaterial3D_gymyn")
 
@@ -226,3 +238,15 @@ offset_top = 20.0
 offset_right = 21.0
 offset_bottom = 43.0
 theme_override_font_sizes/font_size = 16
+
+[node name="CanvasLayer" type="CanvasLayer" parent="."]
+
+[node name="ColorRect" type="ColorRect" parent="CanvasLayer"]
+visible = false
+material = SubResource("ShaderMaterial_igrcy")
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
