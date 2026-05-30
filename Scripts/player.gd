@@ -118,6 +118,22 @@ signal tech_result(tier: String, quality: float, impulse: float)
 ## Tiny freeze after pressing wall tech before the redirect launches.
 @export var wall_tech_freeze_time := 0.055
 
+@export_category("Air Dash")
+## Horizontal impulse added when the player air dashes.
+@export var air_dash_impulse := 16.0
+## Minimum horizontal speed the air dash should produce if the player is moving slowly.
+@export var air_dash_min_speed := 18.0
+## How long the air dash burst is considered active.
+@export var air_dash_duration := 0.12
+## Gravity multiplier while air dashing. Lower values make the dash feel sharper and less droppy.
+@export var air_dash_gravity_scale := 0.25
+## How much existing horizontal velocity is preserved when air dashing.
+@export var air_dash_velocity_preserve := 0.65
+## Extra FOV added briefly when the air dash starts.
+@export var air_dash_fov_bonus := 6.0
+## How long the air dash FOV kick lasts.
+@export var air_dash_fov_time := 0.10
+
 @export_category("Landing Shadow")
 ## Maximum distance the landing shadow ray checks below the player.
 @export var shadow_max_distance := 20.0
@@ -213,6 +229,7 @@ var _gravity := 24.0
 var _jump_pressed_event := false
 var _jump_released_event := false
 var _slide_pressed_event := false
+var _air_dash_pressed_event := false
 
 # Slide state
 var _is_sliding := false
@@ -242,6 +259,13 @@ var _wall_tech_pending := false
 var _wall_tech_stored_velocity := Vector3.ZERO
 var _wall_tech_stored_normal := Vector3.ZERO
 var _wall_tech_fov_timer := 0.0
+
+# Air Dash
+var _air_dash_available := true
+var _is_air_dashing := false
+var _air_dash_timer := 0.0
+var _air_dash_direction := Vector3.ZERO
+var _air_dash_fov_timer := 0.0
 
 # buffer timers
 var _tech_buffer_timer := 0.0      # counts down after an air tap (buffered tech)
@@ -284,6 +308,9 @@ func _input(event: InputEvent) -> void:
 		_slide_pressed_event = true
 		_slide_buffer_timer = slide_buffer_before
 
+	if event.is_action_pressed("air_dash"):
+		_air_dash_pressed_event = true
+
 	if event.is_action_pressed("attack"):
 		_request_finger_gun_fire()
 
@@ -302,7 +329,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		Input.mouse_mode = (
 			Input.MOUSE_MODE_VISIBLE
 			if Input.mouse_mode == Input.MOUSE_MODE_CAPTURED
-			else Input.mouse_mode == Input.MOUSE_MODE_CAPTURED
+			else Input.MOUSE_MODE_CAPTURED
 		)
 
 func _physics_process(delta: float) -> void:
@@ -320,6 +347,11 @@ func _physics_process(delta: float) -> void:
 	_wall_tech_buffer_cd = maxf(_wall_tech_buffer_cd - delta, 0.0)
 	_wall_tech_freeze_timer = maxf(_wall_tech_freeze_timer - delta, 0.0)
 	_wall_tech_fov_timer = maxf(_wall_tech_fov_timer - delta, 0.0)
+	_air_dash_timer = maxf(_air_dash_timer - delta, 0.0)
+	_air_dash_fov_timer = maxf(_air_dash_fov_timer - delta, 0.0)
+	
+	if _air_dash_timer <= 0.0:
+		_is_air_dashing = false
 	
 	_slide_jump_lock_timer = maxf(0.0, _slide_jump_lock_timer - delta)
 	_slide_buffer_timer = maxf(0.0, _slide_buffer_timer - delta)
@@ -347,6 +379,7 @@ func _physics_process(delta: float) -> void:
 		_jump_pressed_event = false
 		_jump_released_event = false
 		_slide_pressed_event = false
+		_air_dash_pressed_event = false
 		return
 	
 	# Movement input
@@ -365,6 +398,11 @@ func _physics_process(delta: float) -> void:
 
 	# Floor state BEFORE movement
 	var on_floor := is_on_floor()
+
+	if on_floor:
+		_air_dash_available = true
+		_is_air_dashing = false
+		_air_dash_timer = 0.0
 
 	# Start slide while already grounded
 	if _has_slide_request() and on_floor and not _is_sliding:
@@ -406,6 +444,10 @@ func _physics_process(delta: float) -> void:
 						print("🟨 TECH BUFFERED (air tap). buffer=", _tech_buffer_timer)
 
 		_jump_pressed_event = false
+
+	if _air_dash_pressed_event:
+		_try_air_dash(on_floor)
+		_air_dash_pressed_event = false
 				
 	# Variable jump (tap = shorter)
 	if _jump_released_event and velocity.y > 0.0:
@@ -413,7 +455,11 @@ func _physics_process(delta: float) -> void:
 
 	# Gravity
 	if not on_floor:
-		velocity.y -= _gravity * delta
+		var gravity_scale := 1.0
+		if _is_air_dashing:
+			gravity_scale = air_dash_gravity_scale
+
+		velocity.y -= _gravity * gravity_scale * delta
 		velocity.y = maxf(velocity.y, -max_fall_speed)
 
 	# Horizontal movement
@@ -511,6 +557,10 @@ func _physics_process(delta: float) -> void:
 
 	# Just landed?
 	if just_landed:
+		_air_dash_available = true
+		_is_air_dashing = false
+		_air_dash_timer = 0.0
+
 		_last_impact_speed = maxf(0.0, -_prev_vel_y)
 
 		# Only allow tech window/tech buffer if the landing had enough impact
@@ -549,6 +599,82 @@ func _physics_process(delta: float) -> void:
 	_jump_pressed_event = false
 	_jump_released_event = false
 	_slide_pressed_event = false
+	_air_dash_pressed_event = false
+
+func _try_air_dash(on_floor: bool) -> void:
+	if on_floor:
+		return
+
+	if not _air_dash_available:
+		return
+
+	var dash_dir := _get_air_dash_direction()
+
+	if dash_dir == Vector3.ZERO:
+		return
+
+	_air_dash_available = false
+	_is_air_dashing = true
+	_air_dash_timer = air_dash_duration
+	_air_dash_direction = dash_dir
+	_air_dash_fov_timer = air_dash_fov_time
+
+	var horizontal_velocity := Vector3(velocity.x, 0.0, velocity.z)
+	var preserved_velocity := horizontal_velocity * air_dash_velocity_preserve
+	var dash_velocity := dash_dir * air_dash_impulse
+	var new_horizontal_velocity := preserved_velocity + dash_velocity
+
+	if new_horizontal_velocity.length() < air_dash_min_speed:
+		new_horizontal_velocity = dash_dir * air_dash_min_speed
+
+	velocity.x = new_horizontal_velocity.x
+	velocity.z = new_horizontal_velocity.z
+
+	_cap_horizontal_speed()
+
+	if velocity.y < 0.0:
+		velocity.y *= 0.35
+
+	if debug_tech:
+		print("🟨 AIR DASH dir=", dash_dir, " speed=", Vector3(velocity.x, 0.0, velocity.z).length())
+
+
+func _get_air_dash_direction() -> Vector3:
+	var move_input := Vector2.ZERO
+	move_input.x = Input.get_action_strength("move_right") - Input.get_action_strength("move_left")
+	move_input.y = Input.get_action_strength("move_forward") - Input.get_action_strength("move_back")
+
+	if move_input.length() > 1.0:
+		move_input = move_input.normalized()
+
+	var forward := -yaw_pivot.global_transform.basis.z
+	var right := yaw_pivot.global_transform.basis.x
+
+	forward.y = 0.0
+	right.y = 0.0
+
+	if forward.length() > 0.001:
+		forward = forward.normalized()
+
+	if right.length() > 0.001:
+		right = right.normalized()
+
+	var dash_dir := Vector3.ZERO
+
+	if move_input.length() > 0.001:
+		dash_dir = (right * move_input.x) + (forward * move_input.y)
+	else:
+		dash_dir = forward
+
+	dash_dir.y = 0.0
+
+	if dash_dir.length() > 0.001:
+		dash_dir = dash_dir.normalized()
+	else:
+		dash_dir = Vector3.ZERO
+
+	return dash_dir
+
 
 func _do_tap_tech(raw_quality_override: float = -1.0) -> void:
 	# Anti-spam cooldown
@@ -1042,6 +1168,10 @@ func _update_camera_fov(delta: float) -> void:
 		var wall_t := _wall_tech_fov_timer / wall_tech_fov_time
 		target_fov += wall_tech_fov_bonus * wall_t
 
+	if _air_dash_fov_timer > 0.0:
+		var dash_t := _air_dash_fov_timer / air_dash_fov_time
+		target_fov += air_dash_fov_bonus * dash_t
+
 	cam.fov = lerpf(cam.fov, target_fov, fov_lerp_speed * delta)
 		
 func _update_debug_hud() -> void:
@@ -1078,6 +1208,9 @@ func _update_debug_hud() -> void:
 		+ "Slide Time Left: " + str(snappedf(slide_time_left, 0.01)) + "\n"
 		+ "Slide Buffer: " + str(snappedf(_slide_buffer_timer, 0.01)) + "\n"
 		+ "Slide Jump Lock: " + str(snappedf(_slide_jump_lock_timer, 0.01)) + "\n"
+		+ "Air Dash Available: " + str(_air_dash_available) + "\n"
+		+ "Air Dashing: " + str(_is_air_dashing) + "\n"
+		+ "Air Dash Timer: " + str(snappedf(_air_dash_timer, 0.01)) + "\n"
 		+ "Wall Tech: " + str(_wall_tech_timer > 0.0) + "\n"
 		+ "Wall Window: %.2f" % _wall_tech_timer + "\n"
 		+ "Wall Freeze: " + str(_wall_tech_pending) + "\n"
